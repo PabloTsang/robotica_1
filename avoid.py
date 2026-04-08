@@ -1,5 +1,56 @@
+'''
+avoid.py
+
+Sample client for the Pioneer P3DX mobile robot that implements a
+kind of heuristic, rule-based controller for collision avoidance.
+
+Copyright (C) 2023 Javier de Lope
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+'''
+
 import robotica
 import time
+
+# Distribución de sensores ultrasónicos Pioneer P3DX (CoppeliaSim)
+# Índices: 0 → 15 en sentido horario alrededor del robot
+
+# FRONT (frontal)
+# [0] frontal izquierdo extremo
+# [1] frontal izquierdo
+# [2] frontal centro-izquierda
+# [3] frontal centro
+# [4] frontal centro-derecha
+# [5] frontal derecha
+# [6] frontal derecho extremo
+
+# RIGHT SIDE (lateral derecho)
+# [7] lateral derecho
+
+# BACK (trasero)
+# [8]  trasero derecho
+# [9]  trasero centro-derecha
+# [10] trasero centro
+# [11] trasero centro-izquierda
+# [12] trasero izquierdo
+
+# LEFT-BACK (entre trasero y lateral izquierdo)
+# [13] trasero-izquierda
+
+# LEFT SIDE (lateral izquierdo)
+# [14] delantero-izquierda
+# [15] lateral izquierdo
 
 # --- VARIABLES GLOBALES ---
 ultimo_error = 0.0
