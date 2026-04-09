@@ -56,44 +56,49 @@ ultimo_error = 0.0
 def avoid(readings, side):
     global ultimo_error
     
-    # Parámetros: ¡MÁS RÁPIDO!
-    target_dist = 0.50  
-    VEL_MAX = 1.0       # Velocidad máxima aumentada al doble
+    # Parámetros
+    target_dist_normal = 0.50  
+    VEL_MAX = 1.0
+    
+    # Velocidad de la rueda interior al rodear una esquina convexa
+    VEL_CURVA_ABIERTA = VEL_MAX * 0.7 
+    
     KP = 4.0
     KD = 2.0
-    UMBRAL_VACIO = 1.2  
+    UMBRAL_VACIO = 1.2 
+    UMBRAL_OBSTACULO_CONTRARIO = 0.4 
+    # Nuevo: límite mínimo para no colisionar con la pared que seguimos
+    DISTANCIA_MINIMA_SEGURIDAD = 0.25 
     
     if side is None:
         return VEL_MAX, VEL_MAX
 
     front_center = readings[3]
+    target_dist = target_dist_normal
 
     # --- LÓGICA PARA LADO DERECHO ---
     if side == 'right':
         d_diag = readings[6]
         front_side = readings[5]
         lat_derecho = readings[7]   
-        tras_derecho = readings[8]  
+        tras_derecho = readings[8]
         
-        # 1. ¡APAGAR TODO Y HACER GIRO EN U! (OVERRIDE)
+        # Detección en lado contrario (izquierdo: sensores 14 y 15)
+        dist_obstaculo = min(readings[15], readings[14])
+        if dist_obstaculo < UMBRAL_OBSTACULO_CONTRARIO:
+            # Cálculo proporcional: a menor distancia del obstáculo, menor target_dist (más cerca de la pared derecha)
+            ratio = dist_obstaculo / UMBRAL_OBSTACULO_CONTRARIO
+            target_dist = DISTANCIA_MINIMA_SEGURIDAD + (target_dist_normal - DISTANCIA_MINIMA_SEGURIDAD) * ratio
+
         if lat_derecho > UMBRAL_VACIO:
             if tras_derecho < UMBRAL_VACIO:
-                # FASE 1: El morro asoma, pero el culo sigue en la pared.
-                # OBLIGATORIO ir recto a toda velocidad para pasar el filo rápido.
                 return VEL_MAX, VEL_MAX
             else:
-                # FASE 2: Ya pasamos la pared por completo.
-                # APAGAMOS TODO y hacemos un giro en U brusco.
-                # Rueda izquierda a tope, rueda derecha hacia atrás (-0.5).
-                return VEL_MAX, -VEL_MAX * 0.5
+                return VEL_MAX, VEL_CURVA_ABIERTA
 
-        # 2. EVASIÓN FRONTAL RÁPIDA (Esquina interior)
         if front_center < 0.5 or front_side < 0.4:
-            # Frenazo y giro brusco a la izquierda
             return -VEL_MAX * 0.5, VEL_MAX
 
-        # 3. SEGUIMIENTO DE PARED NORMAL (PD)
-        # Si llegamos aquí, es que hay pared y no estamos en una esquina.
         error = d_diag - target_dist
         ajuste = (error * KP) + ((error - ultimo_error) * KD)
         ultimo_error = error
@@ -105,26 +110,28 @@ def avoid(readings, side):
         lat_izquierdo = readings[15]
         tras_izquierdo = readings[12]
 
-        # 1. ¡APAGAR TODO Y HACER GIRO EN U! (OVERRIDE)
+        # Detección en lado contrario (derecho: sensores 6 y 7)
+        dist_obstaculo = min(readings[7], readings[6])
+        if dist_obstaculo < UMBRAL_OBSTACULO_CONTRARIO:
+            # Cálculo proporcional
+            ratio = dist_obstaculo / UMBRAL_OBSTACULO_CONTRARIO
+            target_dist = DISTANCIA_MINIMA_SEGURIDAD + (target_dist_normal - DISTANCIA_MINIMA_SEGURIDAD) * ratio
+
         if lat_izquierdo > UMBRAL_VACIO:
             if tras_izquierdo < UMBRAL_VACIO:
                 return VEL_MAX, VEL_MAX
             else:
-                # Rueda derecha a tope, rueda izquierda hacia atrás
-                return -VEL_MAX * 0.5, VEL_MAX
+                return VEL_CURVA_ABIERTA, VEL_MAX
 
-        # 2. EVASIÓN FRONTAL RÁPIDA
         if front_center < 0.5 or front_side < 0.4:
             return VEL_MAX, -VEL_MAX * 0.5
 
-        # 3. SEGUIMIENTO DE PARED NORMAL (PD)
         error = d_diag - target_dist
         ajuste = (error * KP) + ((error - ultimo_error) * KD)
         ultimo_error = error
         ajuste = -ajuste 
 
     # --- FINALIZACIÓN DEL PD ---
-    # Solo afecta si no hemos hecho "return" arriba
     ajuste = max(min(ajuste, VEL_MAX * 0.6), -VEL_MAX * 0.6)
     lspeed = VEL_MAX + ajuste
     rspeed = VEL_MAX - ajuste
