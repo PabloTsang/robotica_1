@@ -21,64 +21,55 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 '''
 
 import robotica
-import time  
 
 # Distribución de sensores ultrasónicos Pioneer P3DX (CoppeliaSim)
 # Índices: 0 → 15 en sentido horario alrededor del robot
 
+# FRONT (frontal)
+# [0] frontal izquierdo extremo
+# [1] frontal izquierdo
+# [2] frontal centro-izquierda
+# [3] frontal centro
+# [4] frontal centro-derecha
+# [5] frontal derecha
+# [6] frontal derecho extremo
+
+# RIGHT SIDE (lateral derecho)
+# [7] lateral derecho
+
+# BACK (trasero)
+# [8]  trasero derecho
+# [9]  trasero centro-derecha
+# [10] trasero centro
+# [11] trasero centro-izquierda
+# [12] trasero izquierdo
+
+# LEFT-BACK (entre trasero y lateral izquierdo)
+# [13] trasero-izquierda
+
+# LEFT SIDE (lateral izquierdo)
+# [14] delantero-izquierda
+# [15] lateral izquierdo
+
 ultimo_error = 0.0
 
-# Variables globales para el temporizador de evasión
-fin_evasion = 0.0
-vel_evasion_l = 0.0
-vel_evasion_r = 0.0
-
 def avoid(readings, side):
-    global ultimo_error, fin_evasion, vel_evasion_l, vel_evasion_r
+    global ultimo_error
     
     # Parámetros
     target_dist_normal = 0.50  
     VEL_MAX = 1.0
-    VEL_CURVA_ABIERTA = VEL_MAX * 0.4 
+    
+    # Velocidad de la rueda interior al rodear una esquina convexa
+    VEL_CURVA_ABIERTA = VEL_MAX * 0.7 
     
     KP = 4.0
     KD = 2.0
     UMBRAL_VACIO = 1.2 
     UMBRAL_OBSTACULO_CONTRARIO = 0.4 
+    # Nuevo: límite mínimo para no colisionar con la pared que seguimos
     DISTANCIA_MINIMA_SEGURIDAD = 0.25 
     
-    # --- 1. COMPROBAR SI ESTAMOS EN MEDIO DE UNA EVASIÓN ---
-    if time.time() < fin_evasion:
-        return vel_evasion_l, vel_evasion_r
-
-    # --- 2. EVASIÓN DE EMERGENCIA (< 0.15m) ---
-    TIEMPO_EVASION = 1.0  
-    
-    for i, dist in enumerate(readings):
-        if dist < 0.15:
-            fin_evasion = time.time() + TIEMPO_EVASION
-            
-            # Frontal (0 al 6): Recula con un ligero giro para no repetir el choque frontal
-            if 0 <= i <= 6:
-                vel_evasion_l, vel_evasion_r = -VEL_MAX, -VEL_MAX * 0.8
-            
-            # Trasera (8 al 13): Escapa hacia adelante
-            elif 8 <= i <= 13:
-                vel_evasion_l, vel_evasion_r = VEL_MAX, VEL_MAX
-            
-            # MODIFICADO: Obstáculo a la derecha (7). 
-            # La rueda izquierda va a tope hacia atrás para que el morro gire rápido a la izquierda.
-            elif i == 7:
-                vel_evasion_l, vel_evasion_r = -VEL_MAX, -VEL_MAX * 0.1
-            
-            # MODIFICADO: Obstáculo a la izquierda (14, 15). 
-            # La rueda derecha va a tope hacia atrás para que el morro gire rápido a la derecha.
-            elif i in (14, 15):
-                vel_evasion_l, vel_evasion_r = -VEL_MAX * 0.1, -VEL_MAX
-                
-            return vel_evasion_l, vel_evasion_r
-    # -----------------------------------------------------
-
     if side is None:
         return VEL_MAX, VEL_MAX
 
@@ -92,24 +83,22 @@ def avoid(readings, side):
         lat_derecho = readings[7]   
         tras_derecho = readings[8]
         
-        # Detección en lado contrario
+        # Detección en lado contrario (izquierdo: sensores 14 y 15)
         dist_obstaculo = min(readings[15], readings[14])
         if dist_obstaculo < UMBRAL_OBSTACULO_CONTRARIO:
+            # Cálculo proporcional: a menor distancia del obstáculo, menor target_dist (más cerca de la pared derecha)
             ratio = dist_obstaculo / UMBRAL_OBSTACULO_CONTRARIO
             target_dist = DISTANCIA_MINIMA_SEGURIDAD + (target_dist_normal - DISTANCIA_MINIMA_SEGURIDAD) * ratio
 
-        # Prioridad 1: Evitar obstáculos frontales ANTES de rodear esquinas
-        if front_center < 0.5 or front_side < 0.4:
-            return -VEL_MAX * 0.5, VEL_MAX
-
-        # Prioridad 2: Esquina convexa (Perdió la pared)
         if lat_derecho > UMBRAL_VACIO:
             if tras_derecho < UMBRAL_VACIO:
                 return VEL_MAX, VEL_MAX
             else:
                 return VEL_MAX, VEL_CURVA_ABIERTA
 
-        # Prioridad 3: Seguidor PD Normal
+        if front_center < 0.5 or front_side < 0.4:
+            return -VEL_MAX * 0.5, VEL_MAX
+
         error = d_diag - target_dist
         ajuste = (error * KP) + ((error - ultimo_error) * KD)
         ultimo_error = error
@@ -121,24 +110,22 @@ def avoid(readings, side):
         lat_izquierdo = readings[15]
         tras_izquierdo = readings[12]
 
-        # Detección en lado contrario
+        # Detección en lado contrario (derecho: sensores 6 y 7)
         dist_obstaculo = min(readings[7], readings[6])
         if dist_obstaculo < UMBRAL_OBSTACULO_CONTRARIO:
+            # Cálculo proporcional
             ratio = dist_obstaculo / UMBRAL_OBSTACULO_CONTRARIO
             target_dist = DISTANCIA_MINIMA_SEGURIDAD + (target_dist_normal - DISTANCIA_MINIMA_SEGURIDAD) * ratio
 
-        # Prioridad 1: Evitar obstáculos frontales ANTES de rodear esquinas
-        if front_center < 0.5 or front_side < 0.4:
-            return VEL_MAX, -VEL_MAX * 0.5
-
-        # Prioridad 2: Esquina convexa (Perdió la pared)
         if lat_izquierdo > UMBRAL_VACIO:
             if tras_izquierdo < UMBRAL_VACIO:
                 return VEL_MAX, VEL_MAX
             else:
                 return VEL_CURVA_ABIERTA, VEL_MAX
 
-        # Prioridad 3: Seguidor PD Normal
+        if front_center < 0.5 or front_side < 0.4:
+            return VEL_MAX, -VEL_MAX * 0.5
+
         error = d_diag - target_dist
         ajuste = (error * KP) + ((error - ultimo_error) * KD)
         ultimo_error = error
