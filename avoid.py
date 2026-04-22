@@ -21,10 +21,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 '''
 
 import robotica
-import time
-
-# Distribución de sensores ultrasónicos Pioneer P3DX (CoppeliaSim)
-# Índices: 0 → 15 en sentido horario alrededor del robot
 
 # FRONT (frontal)
 # [0] frontal izquierdo extremo
@@ -52,143 +48,110 @@ import time
 # [14] delantero-izquierda
 # [15] lateral izquierdo
 
-# --- VARIABLES GLOBALES ---
 ultimo_error = 0.0
-contador_convexo = 0 
-lado_seguimiento = None  # Se fijará en "DER" o "IZQ"
 
-def follow_wall_final(readings):
-    global ultimo_error, contador_convexo, lado_seguimiento
+def avoid(readings, side):
+    global ultimo_error
     
-    # --- CONFIGURACIÓN PARA GIROS SUAVES ---
-    TICKS_RETRASO = 8      
-    RADIO_GIRO = 0.45      # Aumentado para que las curvas en esquinas sean más amplias y parabólicas
-    VEL_MAX = 1.0          # Mantenemos tu velocidad
-    DIST_DESEADA_BASE = 0.40 
-    KP = 2.5               # Reducido un poco para evitar oscilaciones (zig-zag)
-    KD = 7.0               # Reducido proporcionalmente
-    UMBRAL_DETECCION = 0.55 
+    target_dist_normal = 0.50  
+    VEL_MAX = 1.0
+    
+    VEL_CURVA_ABIERTA = VEL_MAX * 0.7 
+    
+    KP = 4.0
+    KD = 2.0
+    UMBRAL_VACIO = 1.2 
+    UMBRAL_OBSTACULO_CONTRARIO = 0.4 
+    DISTANCIA_MINIMA_SEGURIDAD = 0.25 
+    
+    if side is None:
+        return VEL_MAX, VEL_MAX
 
-    # 1. BÚSQUEDA Y BLOQUEO DE LADO
-    if lado_seguimiento is None:
-        dist_lat_izq = readings[0]
-        dist_lat_der = readings[7]
-        dist_frontal = min(readings[3], readings[4])
+    front_center = readings[3]
+    target_dist = target_dist_normal
 
-        if dist_lat_izq < UMBRAL_DETECCION:
-            lado_seguimiento = "IZQ"
-            print(">>> Lado fijado: IZQUIERDA.")
-        elif dist_lat_der < UMBRAL_DETECCION:
-            lado_seguimiento = "DER"
-            print(">>> Lado fijado: DERECHA.")
-        elif dist_frontal < UMBRAL_DETECCION:
-            lado_seguimiento = "DER" 
-            return 0.1, 0.4 # Giro inicial suave
-        else:
-            return VEL_MAX, VEL_MAX
-
-    dist_deseada_actual = DIST_DESEADA_BASE
-    MARGEN_SEGURIDAD_OPUESTO = 0.35 
-
-    # --- LÓGICA SI SIGUE PARED IZQUIERDA ---
-    if lado_seguimiento == "IZQ":
-        dist_opuesta = readings[7]
-        if dist_opuesta < MARGEN_SEGURIDAD_OPUESTO:
-            dist_deseada_actual = max(0.20, DIST_DESEADA_BASE - (MARGEN_SEGURIDAD_OPUESTO - dist_opuesta))
-        
-        # Ampliamos un poco el rango frontal para empezar a girar antes y más suave
-        dist_frontal = min(readings[2], readings[3])
-        d_diag = readings[1]
-        d_lat = readings[0]
-
-        # A. Obstáculo Frontal (Giro en arco, no sobre su eje)
-        if dist_frontal < 0.45:
-            ultimo_error = 0
-            # Mantiene tracción hacia adelante en la rueda exterior para hacer una curva
-            return VEL_MAX * 0.7, -VEL_MAX * 0.1
-
-        # B. Esquina Convexa
-        if d_diag > UMBRAL_DETECCION and d_lat > UMBRAL_DETECCION:
-            if contador_convexo < TICKS_RETRASO:
-                contador_convexo += 1
-                return VEL_MAX, VEL_MAX
-            else:
-                return (VEL_MAX * RADIO_GIRO), VEL_MAX 
-        
-        # C. Seguimiento PD Normal
-        contador_convexo = 0
-        error = d_diag - dist_deseada_actual
-        ajuste = (error * KP) + ((error - ultimo_error) * KD)
-        ultimo_error = error
-        
-        # --- SUAVIZADO DEL CONTROLADOR ---
-        # 1. Saturamos el ajuste para que no provoque cambios violentos
-        ajuste = max(min(ajuste, VEL_MAX * 0.8), -VEL_MAX * 0.8)
-        # 2. Si el robot tiene que corregir mucho, le bajamos la velocidad base temporalmente
-        vel_base = VEL_MAX - (abs(ajuste) * 0.4) 
-        
-        return (vel_base - ajuste), (vel_base + ajuste)
-
-    # --- LÓGICA SI SIGUE PARED DERECHA ---
-    elif lado_seguimiento == "DER":
-        dist_opuesta = readings[0]
-        if dist_opuesta < MARGEN_SEGURIDAD_OPUESTO:
-            dist_deseada_actual = max(0.20, DIST_DESEADA_BASE - (MARGEN_SEGURIDAD_OPUESTO - dist_opuesta))
-
-        dist_frontal = min(readings[4], readings[5])
+    # LADO DERECHO
+    if side == 'right':
         d_diag = readings[6]
-        d_lat = readings[7]
+        front_side = readings[5]
+        lat_derecho = readings[7]   
+        tras_derecho = readings[8]
+        
+        # Deteccion de lado contrario
+        dist_obstaculo = min(readings[15], readings[14])
+        if dist_obstaculo < UMBRAL_OBSTACULO_CONTRARIO:
+            ratio = dist_obstaculo / UMBRAL_OBSTACULO_CONTRARIO
+            target_dist = DISTANCIA_MINIMA_SEGURIDAD + (target_dist_normal - DISTANCIA_MINIMA_SEGURIDAD) * ratio
 
-        # A. Obstáculo Frontal
-        if dist_frontal < 0.45:
-            ultimo_error = 0
-            return -VEL_MAX * 0.1, VEL_MAX * 0.7
-
-        # B. Esquina Convexa
-        if d_diag > UMBRAL_DETECCION and d_lat > UMBRAL_DETECCION:
-            if contador_convexo < TICKS_RETRASO:
-                contador_convexo += 1
+        if lat_derecho > UMBRAL_VACIO:
+            if tras_derecho < UMBRAL_VACIO:
                 return VEL_MAX, VEL_MAX
             else:
-                return VEL_MAX, (VEL_MAX * RADIO_GIRO)
-        
-        # C. Seguimiento PD Normal
-        contador_convexo = 0
-        error = d_diag - dist_deseada_actual
+                return VEL_MAX, VEL_CURVA_ABIERTA
+
+        if front_center < 0.5 or front_side < 0.4:
+            return -VEL_MAX * 0.5, VEL_MAX
+
+        error = d_diag - target_dist
         ajuste = (error * KP) + ((error - ultimo_error) * KD)
         ultimo_error = error
-        
-        # --- SUAVIZADO DEL CONTROLADOR ---
-        ajuste = max(min(ajuste, VEL_MAX * 0.8), -VEL_MAX * 0.8)
-        vel_base = VEL_MAX - (abs(ajuste) * 0.4) 
-        
-        return (vel_base + ajuste), (vel_base - ajuste)
 
-def main():
-    try:
-        coppelia = robotica.Coppelia()
-        robot = robotica.P3DX(coppelia.sim, 'PioneerP3DX') 
-        coppelia.start_simulation()
-        
-        print("Controlador Iniciado. Buscando paredes de forma fluida...")
-        
-        while coppelia.is_running():
-            readings = robot.get_sonar()
-            if readings and len(readings) >= 8:
-                lspeed, rspeed = follow_wall_final(readings)
-                
-                lspeed = max(min(lspeed, 1.5), -1.0)
-                rspeed = max(min(rspeed, 1.5), -1.0)
-                
-                robot.set_speed(lspeed, rspeed)
-            time.sleep(0.05)
+    # LADO IZQUIERDO
+    elif side == 'left':
+        d_diag = readings[1]
+        front_side = readings[2]
+        lat_izquierdo = readings[15]
+        tras_izquierdo = readings[12]
 
-    except Exception as e:
-        print(f"Error en ejecución: {e}")
-    finally:
-        if 'robot' in locals():
-            robot.set_speed(0, 0)
-        coppelia.stop_simulation()
+        # Deteccino en el lado contrario
+        dist_obstaculo = min(readings[7], readings[6])
+        if dist_obstaculo < UMBRAL_OBSTACULO_CONTRARIO:
+            ratio = dist_obstaculo / UMBRAL_OBSTACULO_CONTRARIO
+            target_dist = DISTANCIA_MINIMA_SEGURIDAD + (target_dist_normal - DISTANCIA_MINIMA_SEGURIDAD) * ratio
+
+        if lat_izquierdo > UMBRAL_VACIO:
+            if tras_izquierdo < UMBRAL_VACIO:
+                return VEL_MAX, VEL_MAX
+            else:
+                return VEL_CURVA_ABIERTA, VEL_MAX
+
+        if front_center < 0.5 or front_side < 0.4:
+            return VEL_MAX, -VEL_MAX * 0.5
+
+        error = d_diag - target_dist
+        ajuste = (error * KP) + ((error - ultimo_error) * KD)
+        ultimo_error = error
+        ajuste = -ajuste 
+
+    # Fin PD
+    ajuste = max(min(ajuste, VEL_MAX * 0.6), -VEL_MAX * 0.6)
+    lspeed = VEL_MAX + ajuste
+    rspeed = VEL_MAX - ajuste
+
+    return lspeed, rspeed
+
+
+def main(args=None):
+    coppelia = robotica.Coppelia()
+    robot = robotica.P3DX(coppelia.sim, 'PioneerP3DX')
+    coppelia.start_simulation()
+    
+    wall_side = None 
+    
+    while coppelia.is_running():
+        readings = robot.get_sonar()
+        
+        if wall_side is None:
+            if readings[3] < 0.6: 
+                if readings[2] < readings[5]:
+                    wall_side = "left"
+                else:
+                    wall_side = "right"
+
+        lspeed, rspeed = avoid(readings, side=wall_side)
+        robot.set_speed(lspeed, rspeed)
+        
+    coppelia.stop_simulation()
 
 if __name__ == '__main__':
     main()
